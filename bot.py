@@ -23,7 +23,7 @@ def keep_alive():
     t = threading.Thread(target=run)
     t.start()
 
-TOKEN = "8204501091:AAHNNc6bPzuMVb4q2GVlghJyJhEqPaEEfTg"
+TOKEN = "8204501091:AAGc1WVXAHmpC8tZw22IBvFpvSToQGhOv30"
 ADMIN_ID = 779265338
 CHANNEL_USERNAME = "@meet_mashhad_star"
 
@@ -38,4 +38,3 @@ except Exception as e:
 if __name__ == "__main__":
     keep_alive()
     bot.infinity_polling(none_stop=True, interval=0, timeout=20)
-

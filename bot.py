@@ -1,5 +1,6 @@
 import sqlite3
 import time
+import uuid
 import telebot
 from telebot.types import (
     InlineKeyboardButton,
@@ -41,6 +42,13 @@ try:
             username TEXT
         )
     ''')
+    # جدول جدید برای ذخیره کد رندوم اختصاصی هر کاربر
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS user_tokens (
+            user_id INTEGER PRIMARY KEY,
+            random_token TEXT UNIQUE
+        )
+    ''')
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS replies_map (
             receiver_id INTEGER,
@@ -59,6 +67,24 @@ try:
     conn.commit()
 except Exception as e:
     print(f"DB Error: {e}")
+
+def get_or_create_user_token(user_id):
+    cursor.execute("SELECT random_token FROM user_tokens WHERE user_id = ?", (user_id,))
+    row = cursor.fetchone()
+    if row:
+        return row[0]
+    else:
+        # ساخت یک کد رندوم ۶ کاراکتری یکتا
+        token = uuid.uuid4().hex[:6]
+        try:
+            cursor.execute("INSERT INTO user_tokens (user_id, random_token) VALUES (?, ?)", (user_id, token))
+            conn.commit()
+        except Exception:
+            # اگر تصادفاً تکراری شد دوباره تلاش کن
+            token = uuid.uuid4().hex[:8]
+            cursor.execute("INSERT INTO user_tokens (user_id, random_token) VALUES (?, ?)", (user_id, token))
+            conn.commit()
+        return token
 
 def check_membership(user_id):
     try:
@@ -107,22 +133,33 @@ def send_welcome(message):
 
     args = message.text.split()
     if len(args) > 1 and args[1].startswith("send_"):
-        try:
-            target_id = int(args[1].replace("send_", ""))
-            if target_id == user_id:
-                bot.send_message(user_id, "خخخ نمی‌تونی به خودت پیام ناشناس بفرستی! 😄")
-                return
-            
-            cursor.execute("SELECT * FROM blocks WHERE blocker_id = ? AND blocked_id = ?", (target_id, user_id))
-            if cursor.fetchone():
-                bot.send_message(user_id, "❌ متأسفانه این کاربر شما را بلاک کرده است و نمی‌توانید به او پیام بفرستید.")
-                return
-            
-            bot.send_message(user_id, "پیام خودت را بفرست (متن، عکس، ویس یا فیلم) تا به صورت کاملاً ناشناس ارسال شود:")
-            bot.register_next_step_handler(message, lambda m: forward_anonymous_message(m, target_id))
+        token_arg = args[1].replace("send_", "")
+        
+        # پیدا کردن user_id اصلی بر اساس کد رندوم
+        cursor.execute("SELECT user_id FROM user_tokens WHERE random_token = ?", (token_arg,))
+        t_row = cursor.fetchone()
+        
+        if not t_row:
+            bot.send_message(user_id, "❌ لینک ناشناس نامعتبر است یا وجود ندارد.")
+            show_main_menu(user_id)
             return
-        except ValueError:
-            pass
+            
+        target_id = t_row[0]
+
+        if target_id == user_id:
+            bot.send_message(user_id, "خخخ نمی‌تونی به خودت پیام ناشناس بفرستی! 😄")
+            show_main_menu(user_id)
+            return
+        
+        cursor.execute("SELECT * FROM blocks WHERE blocker_id = ? AND blocked_id = ?", (target_id, user_id))
+        if cursor.fetchone():
+            bot.send_message(user_id, "❌ متأسفانه این کاربر شما را بلاک کرده است و نمی‌توانید به او پیام بفرستید.")
+            show_main_menu(user_id)
+            return
+        
+        bot.send_message(user_id, "پیام خودت را بفرست (متن، عکس، ویس یا فیلم) تا به صورت کاملاً ناشناس ارسال شود:")
+        bot.register_next_step_handler(message, lambda m: forward_anonymous_message(m, target_id))
+        return
 
     show_main_menu(user_id)
 
@@ -173,14 +210,12 @@ def handle_callbacks(call):
             bot.answer_callback_query(call.id, "هنوز در کانال عضو نشده‌اید! ❌", show_alert=True)
         return
 
-    # مدیریت آزاد کردن کاربر از بلاک
     if data.startswith("unblock_"):
         try:
             unblock_id = int(data.split("_")[1])
             cursor.execute("DELETE FROM blocks WHERE blocker_id = ? AND blocked_id = ?", (user_id, unblock_id))
             conn.commit()
             bot.answer_callback_query(call.id, "کاربر از حالت بلاک خارج شد ✅", show_alert=True)
-            # بروزرسانی پیام لیست بلاکی‌ها
             bot.delete_message(user_id, call.message.message_id)
             show_block_list(user_id)
         except Exception:
@@ -258,16 +293,15 @@ def show_block_list(user_id):
     rows = cursor.fetchall()
     
     if not rows:
-        bot.send_message(user_id, " لیست بلاکی‌های شما خالی است. هیچ کاربری مسدود نشده است.")
+        bot.send_message(user_id, "📋 لیست بلاکی‌های شما خالی است. هیچ کاربری مسدود نشده است.")
         return
         
     markup = InlineKeyboardMarkup()
     for row in rows:
         b_id = row[0]
-        # تلاش برای پیدا کردن نام کاربری مسدود شده در صورت وجود در جدول کاربران
         cursor.execute("SELECT username FROM users WHERE user_id = ?", (b_id,))
         u_row = cursor.fetchone()
-        uname = f"@{u_row[0]}" if u_row and u_row[0] else f"کاربر {b_id}"
+        uname = f"@{u_row[0]}" if u_row and u_row[0] else f"کاربر ناشناس"
         
         markup.add(InlineKeyboardButton(f"🔓 آزادسازی {uname}", callback_data=f"unblock_{b_id}"))
         
@@ -318,7 +352,9 @@ def handle_text_messages(message):
 
     if message.text == "🔗 لینک ناشناس من":
         bot_info = bot.get_me()
-        link = f"https://t.me/{bot_info.username}?start=send_{user_id}"
+        # دریافت یا ساخت کد رندوم اختصاصی کاربر
+        user_token = get_or_create_user_token(user_id)
+        link = f"https://t.me/{bot_info.username}?start=send_{user_token}"
         bot.send_message(
             user_id,
             f"🔗 لینک ناشناس اختصاصی شما:\n\n{link}\n\nاین لینک رو برای دوستانت بفرست تا بتونن ناشناس بهت پیام بدن!"

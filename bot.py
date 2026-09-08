@@ -23,11 +23,13 @@ def keep_alive():
     t = threading.Thread(target=run)
     t.start()
 
-# توکن جدید و اطلاعات ربات
+# توکن و اطلاعات ربات
 TOKEN = "8949711651:AAFoUhwinj5UUDv09G_pP6K2lmZJ-XegBl4"
 ADMIN_ID = 779265338
 CHANNEL_USERNAME = "@meet_mashhad_star"
+SUPPORT_USERNAME = "@Mr_saeed123"
 
+# سرعت بالا با فعال‌سازی تردینگ (threaded=True)
 bot = telebot.TeleBot(TOKEN, threaded=True)
 
 # تنظیمات دیتابیس برای ذخیره کاربران و پیام‌ها
@@ -62,24 +64,41 @@ def check_membership(user_id):
         pass
     return False
 
+# تابع نمایش منوی اصلی با سرعت بالا
+def show_main_menu(user_id, message_or_call_obj):
+    markup = ReplyKeyboardMarkup(resize_keyboard=True)
+    markup.add(KeyboardButton("🔗 لینک ناشناس من"), KeyboardButton("⚙️ تنظیمات"))
+    markup.add(KeyboardButton("💬 پشتیبانی"))
+
+    welcome_text = (
+        "مشهد استاری 💫عزیز به ربات چت ناشناس استار خوش اومدین 💞\n\n"
+        "با استفاده از این ربات می‌تونی لینک ناشناس خودت رو بگیری و به صورت کاملاً ناشناس پیام دریافت کنی."
+    )
+    
+    if hasattr(message_or_call_obj, 'message'):
+        try:
+            bot.delete_message(message_or_call_obj.message.chat.id, message_or_call_obj.message.message_id)
+        except Exception:
+            pass
+        bot.send_message(user_id, welcome_text, reply_markup=markup)
+    else:
+        bot.send_message(user_id, welcome_text, reply_markup=markup)
+
 # دستور استارت
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
-    # تفکیک کامل گروه و پی‌وی: اگر پیام در گروه بود، ربات هیچ واکنشی نشان ندهد
     if message.chat.type != 'private':
         return
 
     user_id = message.from_user.id
     username = message.from_user.username
 
-    # ثبت کاربر در دیتابیس
     try:
         cursor.execute("INSERT OR IGNORE INTO users (user_id, username) VALUES (?, ?)", (user_id, username))
         conn.commit()
     except Exception:
         pass
 
-    # بررسی عضویت اجباری در کانال
     if not check_membership(user_id):
         markup = InlineKeyboardMarkup()
         markup.add(InlineKeyboardButton("عضویت در کانال ⭐️", url=f"https://t.me/{CHANNEL_USERNAME.replace('@', '')}"))
@@ -91,7 +110,6 @@ def send_welcome(message):
         )
         return
 
-    # بررسی اینکه آیا کاربر روی لینک ناشناس کسی کلیک کرده است یا خیر
     args = message.text.split()
     if len(args) > 1 and args[1].startswith("send_"):
         try:
@@ -105,16 +123,7 @@ def send_welcome(message):
         except ValueError:
             pass
 
-    # کیبورد اصلی پنل کاربری در پی‌وی
-    markup = ReplyKeyboardMarkup(resize_keyboard=True)
-    markup.add(KeyboardButton("🔗 لینک ناشناس من"), KeyboardButton("⚙️ تنظیمات"))
-    markup.add(KeyboardButton("💬 پشتیبانی"))
-
-    welcome_text = (
-        "سلام! به ربات چت ناشناس خوش آمدی. 🌹\n\n"
-        "با استفاده از این ربات می‌تونی لینک ناشناس خودت رو بگیری و به صورت کاملاً ناشناس پیام دریافت کنی."
-    )
-    bot.send_message(user_id, welcome_text, reply_markup=markup)
+    show_main_menu(user_id, message)
 
 # تابع ارسال پیام ناشناس
 def forward_anonymous_message(message, target_id):
@@ -131,26 +140,30 @@ def forward_anonymous_message(message, target_id):
     except Exception:
         bot.send_message(message.from_user.id, "❌ ارسال پیام ناموفق بود (احتمالاً کاربر ربات را بلاک کرده است).")
 
-# تایید دکمه شیشه‌ای عضویت در کانال
+# تایید آنی دکمه شیشه‌ای عضویت
 @bot.callback_query_handler(func=lambda call: call.data == "check_join")
 def callback_query(call):
     user_id = call.from_user.id
     if check_membership(user_id):
         bot.answer_callback_query(call.id, "عضویت شما تایید شد! 🎉")
-        bot.delete_message(call.message.chat.id, call.message.message_id)
-        fake_message = call.message
-        fake_message.text = "/start"
-        send_welcome(fake_message)
+        show_main_menu(user_id, call)
     else:
         bot.answer_callback_query(call.id, "هنوز در کانال عضو نشده‌اید! ❌", show_alert=True)
 
-# مدیریت دکمه‌های منوی شیشه‌ای و متنی
+# مدیریت دکمه‌ها
 @bot.message_handler(func=lambda message: message.chat.type == 'private')
 def handle_text_messages(message):
     user_id = message.from_user.id
 
     if not check_membership(user_id):
-        bot.send_message(user_id, "لطفاً ابتدا در کانال عضو شوید تا ربات کار کند.")
+        markup = InlineKeyboardMarkup()
+        markup.add(InlineKeyboardButton("عضویت در کانال ⭐️", url=f"https://t.me/{CHANNEL_USERNAME.replace('@', '')}"))
+        markup.add(InlineKeyboardButton("عضو شدم ✅", callback_data="check_join"))
+        bot.send_message(
+            user_id,
+            "برای استفاده از ربات چت ناشناس، ابتدا باید در کانال زیر عضو شوید:",
+            reply_markup=markup
+        )
         return
 
     if message.text == "🔗 لینک ناشناس من":
@@ -163,10 +176,11 @@ def handle_text_messages(message):
     elif message.text == "⚙️ تنظیمات":
         bot.send_message(user_id, "⚙️ بخش تنظیمات ربات (فعلا غیرفعال می‌باشد).")
     elif message.text == "💬 پشتیبانی":
-        bot.send_message(user_id, f"💬 برای ارتباط با پشتیبانی به کانال زیر مراجعه کنید:\n{CHANNEL_USERNAME}")
+        bot.send_message(user_id, f"💬 برای ارتباط با پشتیبان به آیدی درج شده مراجعه کنین:\n{SUPPORT_USERNAME}")
     else:
         bot.send_message(user_id, "دستور نامعتبر است. از دکمه‌های منو استفاده کنید.")
 
 if __name__ == "__main__":
     keep_alive()
-    bot.infinity_polling(none_stop=True, interval=0, timeout=20)
+    # تنظیم پاتینگ با بالاترین سرعت و بدون تاخیر
+    bot.infinity_polling(none_stop=True, interval=0, timeout=0, long_polling_timeout=5)

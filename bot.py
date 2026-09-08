@@ -1,5 +1,6 @@
 import sqlite3
 import threading
+import uuid
 from flask import Flask
 import telebot
 from telebot.types import (
@@ -40,6 +41,12 @@ cursor.execute('''
     )
 ''')
 cursor.execute('''
+    CREATE TABLE IF NOT EXISTS user_tokens (
+        user_id INTEGER PRIMARY KEY,
+        random_token TEXT UNIQUE
+    )
+''')
+cursor.execute('''
     CREATE TABLE IF NOT EXISTS replies_map (
         receiver_id INTEGER,
         bot_msg_id INTEGER,
@@ -55,6 +62,24 @@ cursor.execute('''
     )
 ''')
 conn.commit()
+
+# این تابع چک می‌کند که اگر کاربر توکن دارد همان را برمی‌گرداند (بدون تغییر و بدون انقضا)
+# و اگر ندارد یک توکن رندوم و کوتاه مختص او می‌سازد که هیچ آیدی عددی در آن نیست
+def get_or_create_permanent_token(user_id):
+    cursor.execute("SELECT random_token FROM user_tokens WHERE user_id = ?", (user_id,))
+    row = cursor.fetchone()
+    if row:
+        return row[0]
+    else:
+        token = uuid.uuid4().hex[:6]
+        try:
+            cursor.execute("INSERT INTO user_tokens (user_id, random_token) VALUES (?, ?)", (user_id, token))
+            conn.commit()
+        except:
+            token = uuid.uuid4().hex[:8]
+            cursor.execute("INSERT INTO user_tokens (user_id, random_token) VALUES (?, ?)", (user_id, token))
+            conn.commit()
+        return token
 
 def check_membership(user_id):
     try:
@@ -114,20 +139,16 @@ def send_welcome(message):
 
     args = message.text.split()
     if len(args) > 1 and args[1].startswith("send_"):
-        try:
-            # استخراج مستقیم آیدی عددی مقصد از لینک (دائمی و بدون انقضا)
-            target_id = int(args[1].replace("send_", ""))
-        except ValueError:
+        token_arg = args[1].replace("send_", "")
+        cursor.execute("SELECT user_id FROM user_tokens WHERE random_token = ?", (token_arg,))
+        t_row = cursor.fetchone()
+        
+        if not t_row:
             bot.send_message(user_id, "❌ لینک ناشناس نامعتبر است.")
             show_main_menu(user_id)
             return
             
-        cursor.execute("SELECT user_id FROM users WHERE user_id = ?", (target_id,))
-        if not cursor.fetchone():
-            bot.send_message(user_id, "❌ این کاربر در ربات ثبت‌نام نکرده است.")
-            show_main_menu(user_id)
-            return
-
+        target_id = t_row[0]
         if target_id == user_id:
             bot.send_message(user_id, "نمی‌تونی به خودت پیام بفرستی! 😄")
             show_main_menu(user_id)
@@ -225,7 +246,8 @@ def handle_callbacks(call):
             pass
 
 def send_direct_reply(message, original_sender_id):
-    if message.chat.type != 'private':
+    id_type = message.chat.type
+    if id_type != 'private':
         return
     if message.text in ["🔗 لینک ناشناس من", "⚙️ تنظیمات", "💬 پشتیبانی"]:
         handle_text(message)
@@ -264,8 +286,8 @@ def handle_text(message):
 
     if text == "🔗 لینک ناشناس من":
         bot_info = bot.get_me()
-        # استفاده از آیدی عددی مستقیم - لینک تا ابد پایدار و معتبر می ماند
-        link = f"https://t.me/{bot_info.username}?start=send_{user_id}"
+        token = get_or_create_permanent_token(user_id)
+        link = f"https://t.me/{bot_info.username}?start=send_{token}"
         bot.send_message(user_id, f"🔗 لینک ناشناس اختصاصی شما:\n\n{link}")
     elif text == "⚙️ تنظیمات":
         show_block_list(user_id)

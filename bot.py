@@ -129,8 +129,9 @@ def callback_check(call):
     finally:
         conn.close()
 
+# این بخش باعث می‌شود ربات پیام‌های داخل گروه را کاملاً نادیده بگیرد
 @bot.message_handler(func=lambda message: message.chat.type != "private")
-def ignore_groups(message):
+def ignore_all_group_messages(message):
     return
 
 @bot.message_handler(commands=["start"])

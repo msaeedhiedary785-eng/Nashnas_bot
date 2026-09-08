@@ -3,6 +3,7 @@ import time
 import telebot
 from telebot.types import (
     BotCommand,
+    BotCommandScopeAllPrivateChats,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     KeyboardButton,
@@ -20,7 +21,8 @@ try:
         [
             BotCommand("start", "شروع مجدد"),
             BotCommand("mylink", "لینک من"),
-        ]
+        ],
+        scope=BotCommandScopeAllPrivateChats()
     )
 except Exception:
     pass
@@ -43,11 +45,9 @@ init_conn.close()
 
 JOIN_CACHE = {}
 
-
 def get_db():
     conn = sqlite3.connect("anon_bot.db", check_same_thread=False)
     return conn, conn.cursor()
-
 
 def check_join_fast(user_id, force_check=False):
     now = time.time()
@@ -62,7 +62,6 @@ def check_join_fast(user_id, force_check=False):
     except Exception:
         return True
 
-
 def get_join_markup():
     markup = InlineKeyboardMarkup()
     channel_link = f"https://t.me/{CHANNEL_USERNAME.replace('@', '')}"
@@ -72,19 +71,16 @@ def get_join_markup():
     )
     return markup
 
-
 def get_main_menu():
     markup = ReplyKeyboardMarkup(resize_keyboard=True)
     markup.row(KeyboardButton("🔗 دریافت لینک من"))
     markup.row(KeyboardButton("❓ راهنما"), KeyboardButton("⚙️ تنظیمات"))
     return markup
 
-
 def get_cancel_menu():
     markup = ReplyKeyboardMarkup(resize_keyboard=True)
     markup.add(KeyboardButton("❌ لغو و خروج از چت"))
     return markup
-
 
 @bot.callback_query_handler(func=lambda call: call.data == "check_membership")
 def callback_check(call):
@@ -133,12 +129,9 @@ def callback_check(call):
     finally:
         conn.close()
 
-
-# فیلتر برای اینکه ربات فقط در پی‌وی کار کند و در گروه‌ها هیچ پاسخی ندهد
 @bot.message_handler(func=lambda message: message.chat.type != "private")
 def ignore_groups(message):
     return
-
 
 @bot.message_handler(commands=["start"])
 def send_welcome(message):
@@ -195,7 +188,6 @@ def send_welcome(message):
     finally:
         conn.close()
 
-
 @bot.message_handler(commands=["mylink"])
 def send_mylink(message):
     user_id = message.chat.id
@@ -226,7 +218,6 @@ def send_mylink(message):
         disable_web_page_preview=True,
     )
 
-
 @bot.message_handler(commands=["stats"])
 def send_stats(message):
     if message.chat.id == ADMIN_ID:
@@ -239,7 +230,6 @@ def send_stats(message):
             )
         finally:
             conn.close()
-
 
 @bot.message_handler(func=lambda message: message.text == "❌ لغو و خروج از چت")
 def handle_cancel(message):
@@ -256,7 +246,6 @@ def handle_cancel(message):
         "✅ حالت ارسال پیام ناشناس لغو شد.\n\nبا سپاس از شما مشهد استاری عزیز ❤️",
         reply_markup=get_main_menu(),
     )
-
 
 @bot.message_handler(
     func=lambda message: message.text
@@ -292,7 +281,6 @@ def handle_menu_buttons(message):
         bot.send_message(
             user_id, "⚙️ تنظیمات در حال حاضر پیش‌فرض قرار دارند."
         )
-
 
 @bot.message_handler(
     func=lambda message: True,
@@ -379,7 +367,6 @@ def handle_messages(message):
             )
     finally:
         conn.close()
-
 
 if __name__ == "__main__":
     bot.infinity_polling(

@@ -23,7 +23,7 @@ def keep_alive():
     t = threading.Thread(target=run)
     t.start()
 
-TOKEN = "8204501091:AAHNNc6bPzuMVb4q2GVl"
+TOKEN = "8204501091:AAHNNc6bPzuMVb4q2GVlghJyJhEqPaEEfTg"
 ADMIN_ID = 779265338
 CHANNEL_USERNAME = "@meet_mashhad_star"
 

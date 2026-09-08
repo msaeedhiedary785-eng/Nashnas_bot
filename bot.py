@@ -1,4 +1,3 @@
-
 import sqlite3
 import time
 import telebot
@@ -133,6 +132,12 @@ def callback_check(call):
                 pass
     finally:
         conn.close()
+
+
+# فیلتر برای اینکه ربات فقط در پی‌وی کار کند و در گروه‌ها هیچ پاسخی ندهد
+@bot.message_handler(func=lambda message: message.chat.type != "private")
+def ignore_groups(message):
+    return
 
 
 @bot.message_handler(commands=["start"])

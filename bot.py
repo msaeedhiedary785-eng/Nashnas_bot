@@ -29,10 +29,9 @@ ADMIN_ID = 779265338
 CHANNEL_USERNAME = "@meet_mashhad_star"
 SUPPORT_USERNAME = "@Mr_saeed123"
 
-# سرعت بالا با فعال‌سازی تردینگ (threaded=True)
 bot = telebot.TeleBot(TOKEN, threaded=True)
 
-# تنظیمات دیتابیس برای ذخیره کاربران و پیام‌ها
+# تنظیمات دیتابیس
 try:
     conn = sqlite3.connect('database.db', check_same_thread=False)
     cursor = conn.cursor()
@@ -43,18 +42,17 @@ try:
         )
     ''')
     cursor.execute('''
-        CREATE TABLE IF NOT EXISTS messages (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+        CREATE TABLE IF NOT EXISTS replies_map (
             receiver_id INTEGER,
+            bot_msg_id INTEGER,
             sender_id INTEGER,
-            message_text TEXT
+            PRIMARY KEY (receiver_id, bot_msg_id)
         )
     ''')
     conn.commit()
 except Exception as e:
     print(f"DB Error: {e}")
 
-# تابع بررسی عضویت اجباری در کانال
 def check_membership(user_id):
     try:
         member = bot.get_chat_member(CHANNEL_USERNAME, user_id)
@@ -64,7 +62,6 @@ def check_membership(user_id):
         pass
     return False
 
-# تابع نمایش منوی اصلی با سرعت بالا
 def show_main_menu(user_id, message_or_call_obj):
     markup = ReplyKeyboardMarkup(resize_keyboard=True)
     markup.add(KeyboardButton("🔗 لینک ناشناس من"), KeyboardButton("⚙️ تنظیمات"))
@@ -84,7 +81,6 @@ def show_main_menu(user_id, message_or_call_obj):
     else:
         bot.send_message(user_id, welcome_text, reply_markup=markup)
 
-# دستور استارت
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
     if message.chat.type != 'private':
@@ -116,7 +112,9 @@ def send_welcome(message):
             target_id = int(args[1].replace("send_", ""))
             if target_id == user_id:
                 bot.send_message(user_id, "خخخ نمی‌تونی به خودت پیام ناشناس بفرستی! 😄")
+                show_main_menu(user_id, message)
                 return
+            
             bot.send_message(user_id, "پیام خودت را بفرست (متن، عکس، ویس یا فیلم) تا به صورت کاملاً ناشناس ارسال شود:")
             bot.register_next_step_handler(message, lambda m: forward_anonymous_message(m, target_id))
             return
@@ -125,22 +123,28 @@ def send_welcome(message):
 
     show_main_menu(user_id, message)
 
-# تابع ارسال پیام ناشناس
 def forward_anonymous_message(message, target_id):
     if message.chat.type != 'private':
         return
+    
+    # اگر کاربر دکمه‌های منو را زد، حالت انتظار لغو شده و مستقیماً به منو هدایت می‌شود
     if message.text in ["🔗 لینک ناشناس من", "⚙️ تنظیمات", "💬 پشتیبانی"]:
-        bot.send_message(message.from_user.id, "ارسال پیام لغو شد.")
+        handle_text_messages(message)
         return
 
     try:
         bot.send_message(target_id, "📩 یک پیام ناشناس جدید داری:")
-        bot.copy_message(target_id, message.chat.id, message.message_id)
+        copied_msg = bot.copy_message(target_id, message.chat.id, message.message_id)
+        
+        cursor.execute("INSERT OR REPLACE INTO replies_map (receiver_id, bot_msg_id, sender_id) VALUES (?, ?, ?)",
+                       (target_id, copied_msg.message_id, message.from_user.id))
+        conn.commit()
+
         bot.send_message(message.from_user.id, "✅ پیام ناشناس شما با موفقیت ارسال شد!")
+        show_main_menu(message.from_user.id, message)
     except Exception:
         bot.send_message(message.from_user.id, "❌ ارسال پیام ناموفق بود (احتمالاً کاربر ربات را بلاک کرده است).")
 
-# تایید آنی دکمه شیشه‌ای عضویت
 @bot.callback_query_handler(func=lambda call: call.data == "check_join")
 def callback_query(call):
     user_id = call.from_user.id
@@ -150,9 +154,11 @@ def callback_query(call):
     else:
         bot.answer_callback_query(call.id, "هنوز در کانال عضو نشده‌اید! ❌", show_alert=True)
 
-# مدیریت دکمه‌ها
-@bot.message_handler(func=lambda message: message.chat.type == 'private')
+@bot.message_handler(func=lambda message: True)
 def handle_text_messages(message):
+    if message.chat.type != 'private':
+        return
+        
     user_id = message.from_user.id
 
     if not check_membership(user_id):
@@ -165,6 +171,26 @@ def handle_text_messages(message):
             reply_markup=markup
         )
         return
+
+    # بررسی ریپلی برای پاسخ دادن به پیام ناشناس
+    if message.reply_to_message:
+        cursor.execute("SELECT sender_id FROM replies_map WHERE receiver_id = ? AND bot_msg_id = ?",
+                       (user_id, message.reply_to_message.message_id))
+        row = cursor.fetchone()
+        if row:
+            original_sender_id = row[0]
+            try:
+                bot.send_message(original_sender_id, "📬 پاسخی به پیام ناشناس شما دریافت شد:")
+                copied_reply = bot.copy_message(original_sender_id, message.chat.id, message.message_id)
+                
+                cursor.execute("INSERT OR REPLACE INTO replies_map (receiver_id, bot_msg_id, sender_id) VALUES (?, ?, ?)",
+                               (original_sender_id, copied_reply.message_id, user_id))
+                conn.commit()
+
+                bot.send_message(user_id, "✅ پاسخ شما با موفقیت ارسال شد!")
+            except Exception:
+                bot.send_message(user_id, "❌ ارسال پاسخ ناموفق بود.")
+            return
 
     if message.text == "🔗 لینک ناشناس من":
         bot_info = bot.get_me()
@@ -182,5 +208,4 @@ def handle_text_messages(message):
 
 if __name__ == "__main__":
     keep_alive()
-    # تنظیم پاتینگ با بالاترین سرعت و بدون تاخیر
     bot.infinity_polling(none_stop=True, interval=0, timeout=0, long_polling_timeout=5)
